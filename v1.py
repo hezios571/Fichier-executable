@@ -1,8 +1,18 @@
 from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 from comtypes import CLSCTX_ALL
+import os
+from PIL import Image
+import win32gui, win32api
+
 
 
 def list_audio_sessions():
+    """
+    Cette fonction vérifie les applications qui peuvent émettre du son et montre leur volume associé.
+    Celle-ci ne retourne rien
+
+    Pas certain si cette fonction pourras être utile
+    """
     sessions = AudioUtilities.GetAllSessions()
     for session in sessions:
         process = session.Process
@@ -12,3 +22,85 @@ def list_audio_sessions():
           
             volume = session.SimpleAudioVolume
             print(f"App: {process_name} | Volume: {volume.GetMasterVolume():.2f}")
+
+def set_app_volume(app_name: str, volume: float):
+    """
+    Cette fonction peremt de changer le volume d'une fonction en mettant en paramètres:
+    1. Nom de l'application
+    2. Volume désiré
+
+    La fonction affiche un erreur si l'application est introuvable
+    """
+    sessions = AudioUtilities.GetAllSessions()
+    for session in sessions:
+        process = session.Process
+        if process:
+            process_name = process.name()  # Garde le nom original
+            
+            # On compare avec et sans ".exe" pour éviter les erreurs
+            if process_name.lower() == app_name.lower() or process_name.lower().removesuffix(".exe") == app_name.lower():
+                volume_control = session.SimpleAudioVolume
+                volume_control.SetMasterVolume(volume, None)
+                print(f"Volume de {process_name} défini à {volume * 100:.0f}%")
+                return
+            
+    print(f"Application '{app_name}' not found or not playing audio.")
+
+def extract_icon(exe_path, save_path):
+    """
+    Extrait l'icône d'un fichier .exe et la sauvegarde.
+
+    :param exe_path: Chemin du fichier .exe.
+    :param save_path: Chemin où sauvegarder l'image.
+    """
+    try:
+        large, _ = win32gui.ExtractIconEx(exe_path, 0)
+        if large:
+            icon = large[0]
+            ico_x = win32api.GetSystemMetrics(49)  # Taille icône standard
+            image = Image.new("RGBA", (ico_x, ico_x))
+            hdc = image.im.id
+            win32gui.DrawIcon(hdc, 0, 0, icon)
+            image.save(save_path)
+            win32gui.DestroyIcon(icon)
+            print(f" Icône sauvegardée : {save_path}")
+        else:
+            print(f" Pas d’icône trouvée pour {exe_path}")
+    except Exception as e:
+        print(f" Erreur en extrayant l'icône ({exe_path}): {e}")
+
+
+def fetch_app_icons():
+    """
+    Trouve et extrait les icônes des applications audio actives,
+    puis les enregistre sur le bureau dans le fichier app_icons.
+    """
+    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+    destination_folder = os.path.join(desktop_path, "app_icons")
+
+    if not os.path.exists(destination_folder):
+        os.makedirs(destination_folder)
+
+    print(f" Icons will be saved in: {destination_folder}")
+
+    sessions = AudioUtilities.GetAllSessions()
+    for session in sessions:
+        process = session.Process
+        if process:
+            try:
+                process_name = process.name().removesuffix(".exe")
+                exe_path = process.exe()
+
+                if exe_path and os.path.exists(exe_path):
+                    icon_path = os.path.join(destination_folder, f"{process_name}.png")
+                    extract_icon(exe_path, icon_path)
+                else:
+                    print(f"Chemin non trouvé pour {process_name}")
+
+            except Exception as e:
+                print(f"Impossible d'obtenir le chemin de {process_name}: {e}")
+
+if __name__ == "__main__":
+    #list_audio_sessions()
+    #set_app_volume("spotify.exe", 0.8)
+    fetch_app_icons()
