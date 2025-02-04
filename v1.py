@@ -2,7 +2,7 @@ from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 from comtypes import CLSCTX_ALL
 import os
 from PIL import Image
-import win32gui, win32api
+import win32gui, win32api, win32ui, win32con 
 import serial
 import time
 
@@ -46,42 +46,76 @@ def set_app_volume(app_name: str, volume: float):
             
     print(f"Application '{app_name}' not found or not playing audio.")
 
+def icon_to_image(hicon):
+    # Get system icon dimensions
+    width = win32api.GetSystemMetrics(win32con.SM_CXICON)
+    height = win32api.GetSystemMetrics(win32con.SM_CYICON)
+    
+    # Get the device context for the entire screen
+    hdc = win32gui.GetDC(0)
+    
+    # Create a device context from this handle
+    dc = win32ui.CreateDCFromHandle(hdc)
+    
+    # Create a memory device context
+    memdc = dc.CreateCompatibleDC()
+    
+    # Create a bitmap object
+    bmp = win32ui.CreateBitmap()
+    bmp.CreateCompatibleBitmap(dc, width, height)
+    
+    # Select the bitmap object into the memory DC
+    memdc.SelectObject(bmp)
+    
+    # Fill the background with a transparent color (optional)
+    memdc.FillSolidRect((0, 0, width, height), 0xFFFFFF)  # White background; change if needed
+    
+    # Draw the icon into the memory DC
+    win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
+    
+    # Get bitmap information and bits
+    bmpinfo = bmp.GetInfo()
+    bmpstr = bmp.GetBitmapBits(True)
+    
+    # Create a PIL image from the bitmap bits
+    im = Image.frombuffer(
+        'RGB',
+        (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
+        bmpstr, 'raw', 'BGRX', 0, 1
+    )
+    
+    # Clean up: release DCs and delete objects
+    memdc.DeleteDC()
+    dc.DeleteDC()
+    win32gui.ReleaseDC(0, hdc)
+    win32gui.DestroyIcon(hicon)  # Destroy the icon handle
+    
+    return im
+
 def extract_icon(exe_path, save_path):
-    """
-    Extrait l'icône d'un fichier .exe et la sauvegarde.
-
-    :param exe_path: Chemin du fichier .exe.
-    :param save_path: Chemin où sauvegarder l'image.
-    """
     try:
-        large, _ = win32gui.ExtractIconEx(exe_path, 0)
-        if large:
-            icon = large[0]
-            ico_x = win32api.GetSystemMetrics(49)  # Taille icône standard
-            image = Image.new("RGBA", (ico_x, ico_x))
-            hdc = image.im.id
-            win32gui.DrawIcon(hdc, 0, 0, icon)
+        # Extract the icon handles (large and small)
+        large_icons, _ = win32gui.ExtractIconEx(exe_path, 0)
+        if large_icons:
+            hicon = large_icons[0]
+            # Convert the icon handle to a PIL image
+            image = icon_to_image(hicon)
             image.save(save_path)
-            win32gui.DestroyIcon(icon)
-            print(f" Icône sauvegardée : {save_path}")
+            print(f"Icon saved: {save_path}")
         else:
-            print(f" Pas d’icône trouvée pour {exe_path}")
+            print(f"No icon found for {exe_path}")
     except Exception as e:
-        print(f" Erreur en extrayant l'icône ({exe_path}): {e}")
-
+        print(f"Error extracting icon from {exe_path}: {e}")
 
 def fetch_app_icons():
     """
-    Trouve et extrait les icônes des applications audio actives,
-    puis les enregistre sur le bureau dans le fichier app_icons.
+    Extracts the icons for active audio sessions and saves them to a folder on the desktop.
     """
     desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
     destination_folder = os.path.join(desktop_path, "app_icons")
-
     if not os.path.exists(destination_folder):
         os.makedirs(destination_folder)
-
-    print(f" Icons will be saved in: {destination_folder}")
+    print(f"Icons will be saved in: {destination_folder}")
 
     sessions = AudioUtilities.GetAllSessions()
     for session in sessions:
@@ -89,16 +123,14 @@ def fetch_app_icons():
         if process:
             try:
                 process_name = process.name().removesuffix(".exe")
-                exe_path = process.exe()
-
+                exe_path = process.exe()  # Get the path to the executable
                 if exe_path and os.path.exists(exe_path):
                     icon_path = os.path.join(destination_folder, f"{process_name}.png")
                     extract_icon(exe_path, icon_path)
                 else:
-                    print(f"Chemin non trouvé pour {process_name}")
-
+                    print(f"Executable path not found for {process_name}")
             except Exception as e:
-                print(f"Impossible d'obtenir le chemin de {process_name}: {e}")
+                print(f"Error processing {process.name()}: {e}")
 
 def main():
    
@@ -111,7 +143,9 @@ def main():
     except Exception as e:
         print(f"Error opening serial port: {e}")
         return
-
+    """
+    Possibilité d'utiliser des event interrupts pour rendre le programme moins lourd sur le CPU (pySerial-asyncio)
+    """
     try:
         while True:
             if ser.in_waiting: #si ser.in.waiting=/0, il y a du data dans le buffer
@@ -149,4 +183,5 @@ def main():
         ser.close()
 
 if __name__ == "__main__":
-    main()
+    #main()
+    fetch_app_icons()
