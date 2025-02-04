@@ -5,6 +5,8 @@ from PIL import Image
 import win32gui, win32api, win32ui, win32con 
 import serial
 import time
+import ctypes
+import ctypes.wintypes
 
 def list_audio_sessions():
     """
