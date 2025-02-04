@@ -3,8 +3,8 @@ from comtypes import CLSCTX_ALL
 import os
 from PIL import Image
 import win32gui, win32api
-
-
+import serial
+import time
 
 def list_audio_sessions():
     """
@@ -100,7 +100,53 @@ def fetch_app_icons():
             except Exception as e:
                 print(f"Impossible d'obtenir le chemin de {process_name}: {e}")
 
+def main():
+   
+    port = 'COM4'
+    baud_rate = 115200
+#Le COM4 port doit être disponible donc il ne faut pas ouvrir le serial monitor de esp32
+    try:
+        ser = serial.Serial(port, baud_rate, timeout=1) #attend 1 seconde, s'il n'y a pas de data sur le port = timeout
+        print(f"Connected to {port} at {baud_rate} baud.")
+    except Exception as e:
+        print(f"Error opening serial port: {e}")
+        return
+
+    try:
+        while True:
+            if ser.in_waiting: #si ser.in.waiting=/0, il y a du data dans le buffer
+                try:
+                    line = ser.readline().decode('utf-8').strip() #Lis un ligne de bytes jusqu'au newline et enlève les espaces vides
+                    print(f"Received: {line}")
+                except Exception as e:
+                    print(f"Error decoding serial data: {e}")
+                    continue
+
+                
+                if ',' in line: #s'il y a une virgule, c'est une commande pour modifier le son
+                    parts = line.split(',') #split la ligne en deux partie, avant et après la virgule
+                    if len(parts) == 2: #s'assure qu'il y a juste deux parties (appname et volume)
+                        app_name = parts[0].strip()
+                        try:
+                            volume = float(parts[1].strip())
+                            
+                            if 0.0 <= volume <= 1.0: #s'assurer que le volume est dans le range accepté
+                                set_app_volume(app_name, volume)
+                            else:
+                                print("Volume value out of range (0.0 to 1.0).")
+                        except ValueError:
+                            print(f"Invalid volume value: {parts[1]}")
+                    else:
+                        print("Invalid command format. Expected 'app_name,volume'.")
+                else:
+                    print("Received data does not match the expected command format.")
+                    
+            #permet de ne pas utiliser trop de ressources du CPU, doit probablement être modifié pour des interrupts?
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("Program terminated by user.")
+    finally:
+        ser.close()
+
 if __name__ == "__main__":
-    #list_audio_sessions()
-    #set_app_volume("spotify.exe", 0.8)
-    fetch_app_icons()
+    main()
