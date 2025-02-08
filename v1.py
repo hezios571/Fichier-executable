@@ -186,7 +186,6 @@ def Chunk_send(sprite_data):
 
     chunk_size = 240  # Send in chunks that are smaller than or equal to the RX buffer size
     total_bytes = len(sprite_data) 
-
     for i in range(0, total_bytes, chunk_size):
                 sprite_data = open_app_icon()
                 
@@ -195,7 +194,17 @@ def Chunk_send(sprite_data):
                 ser.flush()
                 print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
                 time.sleep(0.05)  # A short delay between chunks
+    print("Done sending app icon")
                 
+def wait_for_ready_signal(ser):
+    
+    while True:
+        if ser.in_waiting > 0:
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+            if line == "READY_TO_RECEIVE_SPRITE":
+                print("[PC] ESP32 is ready to receive sprite data.")
+                return
+        time.sleep(0.1)
 
 def Handshake():
     ser.reset_input_buffer() 
@@ -213,10 +222,11 @@ def Handshake():
 if __name__ == "__main__":
     ser=init()
     Handshake()
-    #while True:
+    wait_for_ready_signal(ser)
     print("Sending app icons")    
     sprite_data = open_app_icon() #temporaire
     fetch_app_icons()
+    
     Chunk_send(sprite_data)
 
     ser.close()
