@@ -223,7 +223,7 @@ def Chunk_send(sprite_data):
                 chunk = sprite_data[i:i+chunk_size]
                 n = ser.write(chunk)
                 ser.flush()
-                print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
+                #print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
                 time.sleep(0.05)  # A short delay between chunks
     print("Done sending app icon")
                 
