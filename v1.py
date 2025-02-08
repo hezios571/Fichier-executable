@@ -195,17 +195,20 @@ def Chunk_send(sprite_data):
                 ser.flush()
                 #print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
                 time.sleep(0.05)  # A short delay between chunks
-                ser.close()
+                
 
 def Handshake():
+    ser.reset_input_buffer() 
     while True:
-        
         if ser.in_waiting:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
+            print("Received line:", line)
             if line == "READY":
                 print("ESP32 is ready!")
-                ser.write("OK")
+                ser.write(b"OK")
+                ser.flush()  # Ensure the data is sent immediately
                 break
+        time.sleep(0.1)
 
 if __name__ == "__main__":
     ser=init()
@@ -215,5 +218,7 @@ if __name__ == "__main__":
         sprite_data = open_app_icon() #temporaire
         fetch_app_icons()
         Chunk_send(sprite_data)
+    
+        ser.close()
         time.sleep(2)
         
