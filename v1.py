@@ -8,22 +8,8 @@ import time
 import ctypes
 import ctypes.wintypes
 
-def list_audio_sessions():
-    """
-    Cette fonction vérifie les applications qui peuvent émettre du son et montre leur volume associé.
-    Celle-ci ne retourne rien
-
-    Pas certain si cette fonction pourras être utile
-    """
-    sessions = AudioUtilities.GetAllSessions()
-    for session in sessions:
-        process = session.Process
-        if process:
-           
-            process_name = process.name().removesuffix(".exe")  
-          
-            volume = session.SimpleAudioVolume
-            print(f"App: {process_name} | Volume: {volume.GetMasterVolume():.2f}")
+port = 'COM4'
+baud_rate = 115200
 
 def set_app_volume(app_name: str, volume: float):
     """
@@ -113,8 +99,8 @@ def fetch_app_icons():
     """
     Extracts the icons for active audio sessions and saves them to a folder on the desktop.
     """
-    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-    destination_folder = os.path.join(desktop_path, "app_icons")
+    
+    destination_folder = r"C:\Users\Jayro\Desktop\app_icons"
     if not os.path.exists(destination_folder):
         os.makedirs(destination_folder)
     print(f"Icons will be saved in: {destination_folder}")
@@ -134,10 +120,12 @@ def fetch_app_icons():
             except Exception as e:
                 print(f"Error processing {process.name()}: {e}")
 
-def main():
-   
-    port = 'COM4'
-    baud_rate = 115200
+def open_app_icon():
+    with open(r"C:\Users\Jayro\Desktop\app_icons\Razer Synapse 3.png", 'rb') as f:
+        sprite_data = f.read()
+    return sprite_data
+
+def Receive_app_volume():
 #Le COM4 port doit être disponible donc il ne faut pas ouvrir le serial monitor de esp32
     try:
         ser = serial.Serial(port, baud_rate, timeout=1) #attend 1 seconde, s'il n'y a pas de data sur le port = timeout
@@ -176,14 +164,25 @@ def main():
                         print("Invalid command format. Expected 'app_name,volume'.")
                 else:
                     print("Received data does not match the expected command format.")
+            #sert a envoyer les app icons
                     
             #permet de ne pas utiliser trop de ressources du CPU, doit probablement être modifié pour des interrupts?
             time.sleep(0.1)
+            print("sent app icon")
+            ser.write(open_app_icon())
+            ser.close()  
     except KeyboardInterrupt:
         print("Program terminated by user.")
     finally:
         ser.close()
 
 if __name__ == "__main__":
-    #main()
+    
     fetch_app_icons()
+    print("sent app icon")
+    port = 'COM4'
+    baud_rate = 115200
+    ser = serial.Serial(port, baud_rate, timeout=1)
+    ser.write(open_app_icon())
+    ser.close() 
+    time.sleep(1)
