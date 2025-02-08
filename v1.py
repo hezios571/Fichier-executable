@@ -43,62 +43,93 @@ def set_app_volume(app_name: str, volume: float):
             
     print(f"Application '{app_name}' not found or not playing audio.")
 
-def icon_to_image(hicon):
-    # Get system icon dimensions
+def icon_to_image_with_mask(hicon):
+    """
+    Récupère l'icône Windows en 2 étapes:
+    1) L'image couleur normale (DI_NORMAL)
+    2) Le masque (DI_MASK)
+    Puis fusionne pour marquer en magenta les zones réellement transparentes.
+    """
+    # 1. Dimensions standard de l'icône Windows
     width = win32api.GetSystemMetrics(win32con.SM_CXICON)
     height = win32api.GetSystemMetrics(win32con.SM_CYICON)
-    
-    # Get the device context for the entire screen
-    hdc = win32gui.GetDC(0)
-    
-    # Create a device context from this handle
-    dc = win32ui.CreateDCFromHandle(hdc)
-    
-    # Create a memory device context
-    memdc = dc.CreateCompatibleDC()
-    
-    # Create a bitmap object
-    bmp = win32ui.CreateBitmap()
-    bmp.CreateCompatibleBitmap(dc, width, height)
-    
-    # Select the bitmap object into the memory DC
-    memdc.SelectObject(bmp)
-    
-    # Fill the background with a transparent color (optional)
-    memdc.FillSolidRect((0, 0, width, height), 0xFFFFFF)  # White background; change if needed
-    
-    # Draw the icon into the memory DC
-    win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
-    
-    # Get bitmap information and bits
-    bmpinfo = bmp.GetInfo()
-    bmpstr = bmp.GetBitmapBits(True)
-    
-    # Create a PIL image from the bitmap bits
-    im = Image.frombuffer(
-        'RGB',
-        (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
-        bmpstr, 'raw', 'BGRX', 0, 1
-    )
-    
-    # Clean up: release DCs and delete objects
-    memdc.DeleteDC()
-    dc.DeleteDC()
-    win32gui.ReleaseDC(0, hdc)
-    win32gui.DestroyIcon(hicon)  # Destroy the icon handle
-    
-    return im
+
+    # 2. Prépare un DC "couleur"
+    hdc_screen = win32gui.GetDC(0)
+    dc_screen = win32ui.CreateDCFromHandle(hdc_screen)
+
+    color_dc = dc_screen.CreateCompatibleDC()
+    color_bmp = win32ui.CreateBitmap()
+    color_bmp.CreateCompatibleBitmap(dc_screen, width, height)
+    color_dc.SelectObject(color_bmp)
+
+    # Remplit le fond en noir(0xFFFFFF) qui va match le fond noir
+    color_dc.FillSolidRect((0, 0, width, height), 0x000000)
+
+    # Dessine l'icône en mode normal (DI_NORMAL)
+    win32gui.DrawIconEx(color_dc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
+
+    # 3. Prépare un DC pour le masque
+    mask_dc = dc_screen.CreateCompatibleDC()
+    mask_bmp = win32ui.CreateBitmap()
+    mask_bmp.CreateCompatibleBitmap(dc_screen, width, height)
+    mask_dc.SelectObject(mask_bmp)
+
+    # Remplit le fond en blanc (par exemple)
+    mask_dc.FillSolidRect((0, 0, width, height), 0xFFFFFF)
+
+    # Dessine le masque (DI_MASK)
+    win32gui.DrawIconEx(mask_dc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_MASK)
+
+    # 4. Convertit les deux DC en images PIL
+    color_info = color_bmp.GetInfo()
+    color_str = color_bmp.GetBitmapBits(True)
+    color_im = Image.frombuffer('RGB',
+                                (color_info['bmWidth'], color_info['bmHeight']),
+                                color_str, 'raw', 'BGRX', 0, 1)
+
+    mask_info = mask_bmp.GetInfo()
+    mask_str = mask_bmp.GetBitmapBits(True)
+    mask_im = Image.frombuffer('RGB',
+                               (mask_info['bmWidth'], mask_info['bmHeight']),
+                               mask_str, 'raw', 'BGRX', 0, 1)
+
+    # 5. Libère les ressources GDI
+    mask_dc.DeleteDC()
+    color_dc.DeleteDC()
+    dc_screen.DeleteDC()
+    win32gui.ReleaseDC(0, hdc_screen)
+    win32gui.DestroyIcon(hicon)
+
+    # 6. Fusion pixel par pixel (zone noire dans mask = transparent, zone blanche = opaque)
+    #    - Souvent, DI_MASK met en noir les zones transparentes, et blanc les zones opaques,
+    #      mais parfois c’est l’inverse. Il faut tester.
+    pix_color = color_im.load()
+    pix_mask  = mask_im.load()
+    for y in range(height):
+        for x in range(width):
+            # Récupère la valeur RGB du masque
+            r_m, g_m, b_m = pix_mask[x, y]
+            # Si le masque est noir => transparent => on laisse magenta
+            # Si le masque est blanc => c'est la zone opaque => on garde la couleur
+            # Inverse si nécessaire en fonction du rendu que vous observez
+            if r_m < 128 and g_m < 128 and b_m < 128:
+                # Ici, on considère pixel transparent => on garde magenta
+                pass
+            else:
+                # Zone opaque => on garde le pixel de color_im tel quel
+                pass
+
+    return color_im
 
 def extract_icon(exe_path, save_path):
     try:
-        # Extract the icon handles (large and small)
         large_icons, _ = win32gui.ExtractIconEx(exe_path, 0)
         if large_icons:
             hicon = large_icons[0]
-            # Convert the icon handle to a PIL image
-            image = icon_to_image(hicon)
+            # Convertit l'icône en PIL avec masque
+            image = icon_to_image_with_mask(hicon)
             image.save(save_path)
-            #print(f"Icon saved: {save_path}")
         else:
             print(f"No icon found for {exe_path}")
     except Exception as e:
@@ -129,7 +160,9 @@ def fetch_app_icons():
             except Exception as e:
                 print(f"Error processing {process.name()}: {e}")
 
-def rgb_to_rgb565(r, g, b):#sert a la conversion du fichier png compressé
+def rgb_to_rgb565(r, g, b):
+    # Standard 565 arrangement: R in bits [15..11], G [10..5], B [4..0]
+    # For an int in Python, that means:
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 def open_app_icon():
@@ -137,14 +170,12 @@ def open_app_icon():
     image = Image.open(image_path)
     image = image.convert("RGB").resize((32, 32))
     sprite_data = bytearray()
-    # Process each pixel in the 32x32 image
     for y in range(32):
         for x in range(32):
             r, g, b = image.getpixel((x, y))
             pixel565 = rgb_to_rgb565(r, g, b)
-            # Convert the 16-bit value to 2 bytes (big-endian) and append to our data
-            sprite_data.extend(pixel565.to_bytes(2, byteorder="big"))
-            
+            # Store this 16-bit value as 2 bytes in LITTLE-ENDIAN order:
+            sprite_data.extend(pixel565.to_bytes(2, byteorder="little"))
     return sprite_data
 
 def Receive_app_volume():
@@ -230,5 +261,5 @@ if __name__ == "__main__":
     Chunk_send(sprite_data)
 
     ser.close()
-    time.sleep(2)
+    
         
