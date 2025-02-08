@@ -12,7 +12,7 @@ import numpy as np
 def init():
     #Le COM4 port doit être disponible donc il ne faut pas ouvrir le serial monitor de esp32
     port = 'COM4'
-    baud_rate = 115200
+    baud_rate = 57600
     try:
         ser = serial.Serial(port, baud_rate, timeout=1)
     except Exception as e:
@@ -193,7 +193,7 @@ def Chunk_send(sprite_data):
                 chunk = sprite_data[i:i+chunk_size]
                 n = ser.write(chunk)
                 ser.flush()
-                #print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
+                print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
                 time.sleep(0.05)  # A short delay between chunks
                 
 
@@ -205,20 +205,20 @@ def Handshake():
             print("Received line:", line)
             if line == "READY":
                 print("ESP32 is ready!")
-                ser.write(b"OK")
+                ser.write(b"OK\n")
                 ser.flush()  # Ensure the data is sent immediately
                 break
         time.sleep(0.1)
 
 if __name__ == "__main__":
     ser=init()
+    Handshake()
+    #while True:
+    print("Sending app icons")    
+    sprite_data = open_app_icon() #temporaire
+    fetch_app_icons()
+    Chunk_send(sprite_data)
 
-    while True:
-        Handshake()
-        sprite_data = open_app_icon() #temporaire
-        fetch_app_icons()
-        Chunk_send(sprite_data)
-    
-        ser.close()
-        time.sleep(2)
+    ser.close()
+    time.sleep(2)
         
