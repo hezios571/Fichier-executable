@@ -9,8 +9,16 @@ import ctypes
 import ctypes.wintypes
 import numpy as np
 
-port = 'COM4'
-baud_rate = 115200
+def init():
+    #Le COM4 port doit être disponible donc il ne faut pas ouvrir le serial monitor de esp32
+    port = 'COM4'
+    baud_rate = 115200
+    try:
+        ser = serial.Serial(port, baud_rate, timeout=1)
+    except Exception as e:
+        print(f"Error opening serial port: {e}")
+        return
+    return ser
 
 def set_app_volume(app_name: str, volume: float):
     """
@@ -140,16 +148,6 @@ def open_app_icon():
     return sprite_data
 
 def Receive_app_volume():
-#Le COM4 port doit être disponible donc il ne faut pas ouvrir le serial monitor de esp32
-    try:
-        ser = serial.Serial(port, baud_rate, timeout=1) #attend 1 seconde, s'il n'y a pas de data sur le port = timeout
-        print(f"Connected to {port} at {baud_rate} baud.")
-    except Exception as e:
-        print(f"Error opening serial port: {e}")
-        return
-    """
-    Possibilité d'utiliser des event interrupts pour rendre le programme moins lourd sur le CPU (pySerial-asyncio)
-    """
     try:
         while True:
             if ser.in_waiting: #si ser.in.waiting=/0, il y a du data dans le buffer
@@ -160,7 +158,6 @@ def Receive_app_volume():
                     print(f"Error decoding serial data: {e}")
                     continue
 
-                
                 if ',' in line: #s'il y a une virgule, c'est une commande pour modifier le son
                     parts = line.split(',') #split la ligne en deux partie, avant et après la virgule
                     if len(parts) == 2: #s'assure qu'il y a juste deux parties (appname et volume)
@@ -178,26 +175,45 @@ def Receive_app_volume():
                         print("Invalid command format. Expected 'app_name,volume'.")
                 else:
                     print("Received data does not match the expected command format.")
-            #sert a envoyer les app icons
-                    
-            #permet de ne pas utiliser trop de ressources du CPU, doit probablement être modifié pour des interrupts?
+
             time.sleep(0.1)
-            print("sent app icon")
-            ser.write(open_app_icon())
-            ser.close()  
     except KeyboardInterrupt:
         print("Program terminated by user.")
     finally:
         ser.close()
 
-if __name__ == "__main__":
+def Chunk_send(sprite_data):
+
+    chunk_size = 240  # Send in chunks that are smaller than or equal to the RX buffer size
+    total_bytes = len(sprite_data) 
+
+    for i in range(0, total_bytes, chunk_size):
+                sprite_data = open_app_icon()
+                
+                chunk = sprite_data[i:i+chunk_size]
+                n = ser.write(chunk)
+                ser.flush()
+                #print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
+                time.sleep(0.05)  # A short delay between chunks
+                ser.close()
+
+def Handshake():
     while True:
+        
+        if ser.in_waiting:
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+            if line == "READY":
+                print("ESP32 is ready!")
+                ser.write("OK")
+                break
+
+if __name__ == "__main__":
+    ser=init()
+
+    while True:
+        Handshake()
+        sprite_data = open_app_icon() #temporaire
         fetch_app_icons()
-        port = 'COM4'
-        baud_rate = 57600
-        ser = serial.Serial(port, baud_rate, timeout=1)
-        sprite_data = open_app_icon()
-        ser.write(sprite_data)
-        ser.close() 
-        print("sent app icon")
+        Chunk_send(sprite_data)
         time.sleep(2)
+        
