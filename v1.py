@@ -7,6 +7,7 @@ import serial
 import time
 import ctypes
 import ctypes.wintypes
+import numpy as np
 
 port = 'COM4'
 baud_rate = 115200
@@ -89,7 +90,7 @@ def extract_icon(exe_path, save_path):
             # Convert the icon handle to a PIL image
             image = icon_to_image(hicon)
             image.save(save_path)
-            print(f"Icon saved: {save_path}")
+            #print(f"Icon saved: {save_path}")
         else:
             print(f"No icon found for {exe_path}")
     except Exception as e:
@@ -103,7 +104,7 @@ def fetch_app_icons():
     destination_folder = r"C:\Users\Jayro\Desktop\app_icons"
     if not os.path.exists(destination_folder):
         os.makedirs(destination_folder)
-    print(f"Icons will be saved in: {destination_folder}")
+    #print(f"Icons will be saved in: {destination_folder}")
 
     sessions = AudioUtilities.GetAllSessions()
     for session in sessions:
@@ -120,9 +121,22 @@ def fetch_app_icons():
             except Exception as e:
                 print(f"Error processing {process.name()}: {e}")
 
+def rgb_to_rgb565(r, g, b):#sert a la conversion du fichier png compressé
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
 def open_app_icon():
-    with open(r"C:\Users\Jayro\Desktop\app_icons\Razer Synapse 3.png", 'rb') as f:
-        sprite_data = f.read()
+    image_path = r"C:\Users\Jayro\Desktop\app_icons\Razer Synapse 3.png"
+    image = Image.open(image_path)
+    image = image.convert("RGB").resize((32, 32))
+    sprite_data = bytearray()
+    # Process each pixel in the 32x32 image
+    for y in range(32):
+        for x in range(32):
+            r, g, b = image.getpixel((x, y))
+            pixel565 = rgb_to_rgb565(r, g, b)
+            # Convert the 16-bit value to 2 bytes (big-endian) and append to our data
+            sprite_data.extend(pixel565.to_bytes(2, byteorder="big"))
+            
     return sprite_data
 
 def Receive_app_volume():
@@ -177,12 +191,13 @@ def Receive_app_volume():
         ser.close()
 
 if __name__ == "__main__":
-    
-    fetch_app_icons()
-    print("sent app icon")
-    port = 'COM4'
-    baud_rate = 115200
-    ser = serial.Serial(port, baud_rate, timeout=1)
-    ser.write(open_app_icon())
-    ser.close() 
-    time.sleep(1)
+    while True:
+        fetch_app_icons()
+        port = 'COM4'
+        baud_rate = 57600
+        ser = serial.Serial(port, baud_rate, timeout=1)
+        sprite_data = open_app_icon()
+        ser.write(sprite_data)
+        ser.close() 
+        print("sent app icon")
+        time.sleep(2)
