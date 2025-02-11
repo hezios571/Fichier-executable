@@ -11,7 +11,7 @@ import numpy as np
 
 def init():
     # Le COM port doit être disponible (ne pas ouvrir l'ESP32 sur un autre programme)
-    port = 'COM3'
+    port = 'COM4'
     baud_rate = 57600
     try:
         ser = serial.Serial(port, baud_rate, timeout=1)
@@ -158,14 +158,14 @@ def rgb_to_rgb565(r, g, b):
     # Convertit un triplet (R, G, B) en format 16 bits 565
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
-def open_app_icon():
+def open_app_icon(sprite):
     """
-    Ouvre l'icône "Razer Synapse 3.png" (exemple) depuis 'app_icons',
+    Ouvre l'icône "sprite" depuis 'app_icons',
     la convertit en RGB565, et renvoie les données sous forme de bytes.
     """
-    # Chemin du dossier 'app_icons' dans le même répertoire que ce script
+    # Chemin du dossier 'app_icons' dans le même répertoire que le script V1
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    image_path = os.path.join(script_dir, "app_icons", "Spotify.png")
+    image_path = os.path.join(script_dir, "app_icons", sprite + ".png")
 
     image = Image.open(image_path)
     image = image.convert("RGB").resize((32, 32))
@@ -174,7 +174,7 @@ def open_app_icon():
         for x in range(32):
             r, g, b = image.getpixel((x, y))
             pixel565 = rgb_to_rgb565(r, g, b)
-            sprite_data.extend(pixel565.to_bytes(2, byteorder="little"))
+            sprite_data.extend(pixel565.to_bytes(2, byteorder="little")) #little endian pour que l'application affiche correctement
     return sprite_data
 
 def Receive_app_volume():
@@ -214,25 +214,19 @@ def Receive_app_volume():
     finally:
         ser.close()
 
-def Chunk_send(sprite_data):
+def Chunk_send(data):
     """
     Découpe les données de l'icône en blocs de taille 'chunk_size'
     et les envoie à l'ESP32.
     """
     chunk_size = 240
-    total_bytes = len(sprite_data)
+    total_bytes = len(data)
     for i in range(0, total_bytes, chunk_size):
-        # IMPORTANT: Vous devez relire sprite_data si vous avez besoin de le renvoyer complet
-        #            (sinon, vous risquez de réutiliser le même chunk).
-        #            Ici, réouverture pour l'exemple, mais si vous avez déjà
-        #            sprite_data complet, vous n'avez pas besoin de rappeler open_app_icon() à chaque itération.
-        sprite_data = open_app_icon()
-
-        chunk = sprite_data[i:i+chunk_size]
+        chunk = data[i:i+chunk_size]
         n = ser.write(chunk)
         ser.flush()
         time.sleep(0.05)
-    print("Done sending app icon")
+    print("Chunks sent")
 
 def wait_for_ready_signal(ser):
     """
@@ -264,24 +258,31 @@ def Handshake():
                 break
         time.sleep(0.1)
 
-if __name__ == "__main__":
-    ser = init()
-    if ser is None:
-        print("Serial port not initialized. Exiting.")
-        exit(1)
-
-    # Handshake avec l'ESP32
-    Handshake()
-
-    # Attend le signal ESP32 pour envoyer l'icône
+def send_app_icons():
+    sessions = AudioUtilities.GetAllSessions()
+    fetch_app_icons()
     wait_for_ready_signal(ser)
     print("Sending app icons...")
+    first_iteration = True
+    for session in sessions:
+        app = session.Process
+        if app==None:
+            break
+        else:
+            if first_iteration:
+                first_iteration = False  
+            elif app.name() == app_name + ".exe":
+                continue
+            app_name=app.name().removesuffix(".exe")
+            sprite_data = open_app_icon(app_name)
+            Chunk_send(sprite_data)
+    print("Done sending icons")
 
-    # Extraire toutes les icônes des sessions audio dans le même dossier que le script
-    fetch_app_icons()
 
-    # Préparer et envoyer l'icône "Razer Synapse 3.png" (exemple)
-    sprite_data = open_app_icon()
-    Chunk_send(sprite_data)
 
+
+if __name__ == "__main__":
+    ser = init()
+    Handshake()
+    send_app_icons()
     ser.close()
