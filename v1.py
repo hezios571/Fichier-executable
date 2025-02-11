@@ -2,7 +2,7 @@ from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 from comtypes import CLSCTX_ALL
 import os
 from PIL import Image
-import win32gui, win32api, win32ui, win32con 
+import win32gui, win32api, win32ui, win32con
 import serial
 import time
 import ctypes
@@ -10,8 +10,8 @@ import ctypes.wintypes
 import numpy as np
 
 def init():
-    #Le COM4 port doit être disponible donc il ne faut pas ouvrir le serial monitor de esp32
-    port = 'COM4'
+    # Le COM port doit être disponible (ne pas ouvrir l'ESP32 sur un autre programme)
+    port = 'COM3'
     baud_rate = 57600
     try:
         ser = serial.Serial(port, baud_rate, timeout=1)
@@ -22,66 +22,62 @@ def init():
 
 def set_app_volume(app_name: str, volume: float):
     """
-    Cette fonction peremt de changer le volume d'une fonction en mettant en paramètres:
-    1. Nom de l'application
-    2. Volume désiré
+    Change le volume d'une application donnée.
 
-    La fonction affiche un erreur si l'application est introuvable
+    Paramètres:
+      - app_name (str): Nom de l'application
+      - volume (float): Niveau de volume (0.0 à 1.0)
     """
     sessions = AudioUtilities.GetAllSessions()
     for session in sessions:
         process = session.Process
         if process:
-            process_name = process.name()  # Garde le nom original
-            
-            # On compare avec et sans ".exe" pour éviter les erreurs
-            if process_name.lower() == app_name.lower() or process_name.lower().removesuffix(".exe") == app_name.lower():
+            process_name = process.name()
+            # Compare avec et sans ".exe"
+            if (process_name.lower() == app_name.lower() or
+               process_name.lower().removesuffix(".exe") == app_name.lower()):
                 volume_control = session.SimpleAudioVolume
                 volume_control.SetMasterVolume(volume, None)
                 print(f"Volume de {process_name} défini à {volume * 100:.0f}%")
                 return
-            
+
     print(f"Application '{app_name}' not found or not playing audio.")
 
 def icon_to_image_with_mask(hicon):
     """
-    Récupère l'icône Windows en 2 étapes:
-    1) L'image couleur normale (DI_NORMAL)
-    2) Le masque (DI_MASK)
-    Puis fusionne pour marquer en magenta les zones réellement transparentes.
+    Convertit un handle d'icône Windows (hicon) en objet PIL.Image,
+    en gérant la transparence via un masque.
     """
-    # 1. Dimensions standard de l'icône Windows
     width = win32api.GetSystemMetrics(win32con.SM_CXICON)
     height = win32api.GetSystemMetrics(win32con.SM_CYICON)
 
-    # 2. Prépare un DC "couleur"
+    # DC écran
     hdc_screen = win32gui.GetDC(0)
     dc_screen = win32ui.CreateDCFromHandle(hdc_screen)
 
+    # DC couleur
     color_dc = dc_screen.CreateCompatibleDC()
     color_bmp = win32ui.CreateBitmap()
     color_bmp.CreateCompatibleBitmap(dc_screen, width, height)
     color_dc.SelectObject(color_bmp)
 
-    # Remplit le fond en noir(0xFFFFFF) qui va match le fond noir
+    # Remplit le fond en noir (0x000000)
     color_dc.FillSolidRect((0, 0, width, height), 0x000000)
-
-    # Dessine l'icône en mode normal (DI_NORMAL)
+    # Dessine l'icône en mode normal
     win32gui.DrawIconEx(color_dc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
 
-    # 3. Prépare un DC pour le masque
+    # DC pour le masque
     mask_dc = dc_screen.CreateCompatibleDC()
     mask_bmp = win32ui.CreateBitmap()
     mask_bmp.CreateCompatibleBitmap(dc_screen, width, height)
     mask_dc.SelectObject(mask_bmp)
 
-    # Remplit le fond en blanc (par exemple)
+    # Remplit le fond en blanc
     mask_dc.FillSolidRect((0, 0, width, height), 0xFFFFFF)
-
-    # Dessine le masque (DI_MASK)
+    # Dessine le masque
     win32gui.DrawIconEx(mask_dc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_MASK)
 
-    # 4. Convertit les deux DC en images PIL
+    # Convertit DC → PIL
     color_info = color_bmp.GetInfo()
     color_str = color_bmp.GetBitmapBits(True)
     color_im = Image.frombuffer('RGB',
@@ -94,40 +90,37 @@ def icon_to_image_with_mask(hicon):
                                (mask_info['bmWidth'], mask_info['bmHeight']),
                                mask_str, 'raw', 'BGRX', 0, 1)
 
-    # 5. Libère les ressources GDI
+    # Libère GDI
     mask_dc.DeleteDC()
     color_dc.DeleteDC()
     dc_screen.DeleteDC()
     win32gui.ReleaseDC(0, hdc_screen)
     win32gui.DestroyIcon(hicon)
 
-    # 6. Fusion pixel par pixel (zone noire dans mask = transparent, zone blanche = opaque)
-    #    - Souvent, DI_MASK met en noir les zones transparentes, et blanc les zones opaques,
-    #      mais parfois c’est l’inverse. Il faut tester.
+    # Fusion pixel par pixel
     pix_color = color_im.load()
     pix_mask  = mask_im.load()
     for y in range(height):
         for x in range(width):
-            # Récupère la valeur RGB du masque
             r_m, g_m, b_m = pix_mask[x, y]
-            # Si le masque est noir => transparent => on laisse magenta
-            # Si le masque est blanc => c'est la zone opaque => on garde la couleur
-            # Inverse si nécessaire en fonction du rendu que vous observez
+            # Ajustez selon la logique de masque désirée
             if r_m < 128 and g_m < 128 and b_m < 128:
-                # Ici, on considère pixel transparent => on garde magenta
+                # Considéré transparent
                 pass
             else:
-                # Zone opaque => on garde le pixel de color_im tel quel
+                # Considéré opaque
                 pass
 
     return color_im
 
 def extract_icon(exe_path, save_path):
+    """
+    Extrait la première icône large d'un exécutable et la sauvegarde en image PNG.
+    """
     try:
         large_icons, _ = win32gui.ExtractIconEx(exe_path, 0)
         if large_icons:
             hicon = large_icons[0]
-            # Convertit l'icône en PIL avec masque
             image = icon_to_image_with_mask(hicon)
             image.save(save_path)
         else:
@@ -137,13 +130,14 @@ def extract_icon(exe_path, save_path):
 
 def fetch_app_icons():
     """
-    Extracts the icons for active audio sessions and saves them to a folder on the desktop.
+    Extrait les icônes pour les applications audio actives et les
+    sauvegarde dans un dossier 'app_icons' au même endroit que le script.
     """
-    
-    destination_folder = r"C:\Users\Jayro\Desktop\app_icons"
+    # Chemin du dossier 'app_icons' dans le même répertoire que ce script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    destination_folder = os.path.join(script_dir, "app_icons")
     if not os.path.exists(destination_folder):
         os.makedirs(destination_folder)
-    #print(f"Icons will be saved in: {destination_folder}")
 
     sessions = AudioUtilities.GetAllSessions()
     for session in sessions:
@@ -151,7 +145,7 @@ def fetch_app_icons():
         if process:
             try:
                 process_name = process.name().removesuffix(".exe")
-                exe_path = process.exe()  # Get the path to the executable
+                exe_path = process.exe()
                 if exe_path and os.path.exists(exe_path):
                     icon_path = os.path.join(destination_folder, f"{process_name}.png")
                     extract_icon(exe_path, icon_path)
@@ -161,12 +155,18 @@ def fetch_app_icons():
                 print(f"Error processing {process.name()}: {e}")
 
 def rgb_to_rgb565(r, g, b):
-    # Standard 565 arrangement: R in bits [15..11], G [10..5], B [4..0]
-    # For an int in Python, that means:
+    # Convertit un triplet (R, G, B) en format 16 bits 565
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 def open_app_icon():
-    image_path = r"C:\Users\Jayro\Desktop\app_icons\Razer Synapse 3.png"
+    """
+    Ouvre l'icône "Razer Synapse 3.png" (exemple) depuis 'app_icons',
+    la convertit en RGB565, et renvoie les données sous forme de bytes.
+    """
+    # Chemin du dossier 'app_icons' dans le même répertoire que ce script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    image_path = os.path.join(script_dir, "app_icons", "Spotify.png")
+
     image = Image.open(image_path)
     image = image.convert("RGB").resize((32, 32))
     sprite_data = bytearray()
@@ -174,29 +174,31 @@ def open_app_icon():
         for x in range(32):
             r, g, b = image.getpixel((x, y))
             pixel565 = rgb_to_rgb565(r, g, b)
-            # Store this 16-bit value as 2 bytes in LITTLE-ENDIAN order:
             sprite_data.extend(pixel565.to_bytes(2, byteorder="little"))
     return sprite_data
 
 def Receive_app_volume():
+    """
+    Boucle principale pour lire les commandes reçues de l'ESP32.
+    Format attendu: "app_name,volume"
+    """
     try:
         while True:
-            if ser.in_waiting: #si ser.in.waiting=/0, il y a du data dans le buffer
+            if ser.in_waiting:  # s'il y a du data dans le buffer
                 try:
-                    line = ser.readline().decode('utf-8').strip() #Lis un ligne de bytes jusqu'au newline et enlève les espaces vides
+                    line = ser.readline().decode('utf-8').strip()
                     print(f"Received: {line}")
                 except Exception as e:
                     print(f"Error decoding serial data: {e}")
                     continue
 
-                if ',' in line: #s'il y a une virgule, c'est une commande pour modifier le son
-                    parts = line.split(',') #split la ligne en deux partie, avant et après la virgule
-                    if len(parts) == 2: #s'assure qu'il y a juste deux parties (appname et volume)
+                if ',' in line:  # commande pour modifier le son
+                    parts = line.split(',')
+                    if len(parts) == 2:
                         app_name = parts[0].strip()
                         try:
                             volume = float(parts[1].strip())
-                            
-                            if 0.0 <= volume <= 1.0: #s'assurer que le volume est dans le range accepté
+                            if 0.0 <= volume <= 1.0:
                                 set_app_volume(app_name, volume)
                             else:
                                 print("Volume value out of range (0.0 to 1.0).")
@@ -206,7 +208,6 @@ def Receive_app_volume():
                         print("Invalid command format. Expected 'app_name,volume'.")
                 else:
                     print("Received data does not match the expected command format.")
-
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("Program terminated by user.")
@@ -214,21 +215,29 @@ def Receive_app_volume():
         ser.close()
 
 def Chunk_send(sprite_data):
-
-    chunk_size = 240  # Send in chunks that are smaller than or equal to the RX buffer size
-    total_bytes = len(sprite_data) 
+    """
+    Découpe les données de l'icône en blocs de taille 'chunk_size'
+    et les envoie à l'ESP32.
+    """
+    chunk_size = 240
+    total_bytes = len(sprite_data)
     for i in range(0, total_bytes, chunk_size):
-                sprite_data = open_app_icon()
-                
-                chunk = sprite_data[i:i+chunk_size]
-                n = ser.write(chunk)
-                ser.flush()
-                #print(f"Chunk {i//chunk_size + 1}: {n} bytes written")
-                time.sleep(0.05)  # A short delay between chunks
+        # IMPORTANT: Vous devez relire sprite_data si vous avez besoin de le renvoyer complet
+        #            (sinon, vous risquez de réutiliser le même chunk).
+        #            Ici, réouverture pour l'exemple, mais si vous avez déjà
+        #            sprite_data complet, vous n'avez pas besoin de rappeler open_app_icon() à chaque itération.
+        sprite_data = open_app_icon()
+
+        chunk = sprite_data[i:i+chunk_size]
+        n = ser.write(chunk)
+        ser.flush()
+        time.sleep(0.05)
     print("Done sending app icon")
-                
+
 def wait_for_ready_signal(ser):
-    
+    """
+    Attend le signal "READY_TO_RECEIVE_SPRITE" depuis l'ESP32.
+    """
     while True:
         if ser.in_waiting > 0:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
@@ -238,7 +247,12 @@ def wait_for_ready_signal(ser):
         time.sleep(0.1)
 
 def Handshake():
-    ser.reset_input_buffer() 
+    """
+    Effectue un handshake initial avec l'ESP32:
+      - Attend un message "READY"
+      - Répond "OK"
+    """
+    ser.reset_input_buffer()
     while True:
         if ser.in_waiting:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
@@ -246,20 +260,28 @@ def Handshake():
             if line == "READY":
                 print("ESP32 is ready!")
                 ser.write(b"OK\n")
-                ser.flush()  # Ensure the data is sent immediately
+                ser.flush()
                 break
         time.sleep(0.1)
 
 if __name__ == "__main__":
-    ser=init()
+    ser = init()
+    if ser is None:
+        print("Serial port not initialized. Exiting.")
+        exit(1)
+
+    # Handshake avec l'ESP32
     Handshake()
+
+    # Attend le signal ESP32 pour envoyer l'icône
     wait_for_ready_signal(ser)
-    print("Sending app icons")    
-    sprite_data = open_app_icon() #temporaire
+    print("Sending app icons...")
+
+    # Extraire toutes les icônes des sessions audio dans le même dossier que le script
     fetch_app_icons()
-    
+
+    # Préparer et envoyer l'icône "Razer Synapse 3.png" (exemple)
+    sprite_data = open_app_icon()
     Chunk_send(sprite_data)
 
     ser.close()
-    
-        
