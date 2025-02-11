@@ -9,26 +9,9 @@ import ctypes
 import ctypes.wintypes
 import numpy as np
 
-def find_serial_port():
-    """
-    Automatically detects an available serial port for the ESP32.
-    Returns the port name (e.g., 'COM3', '/dev/ttyUSB0') or None if no device is found.
-    """
-    ports = serial.tools.list_ports.comports()
-    for port in ports:
-        # Print available ports (for debugging)
-        print(f"Found port: {port.device} - {port.description}")
-
-        # Check if it's likely an ESP32
-        if "USB" in port.description or "UART" in port.description or "Silicon" in port.manufacturer:
-            print(f"Selected: {port.device}")
-            return port.device  # Return the detected port
-
-    return None  # No port found
-
 def init():
     #Le COM4 port doit être disponible donc il ne faut pas ouvrir le serial monitor de esp32
-    port = find_serial_port()
+    port = 'COM4'
     baud_rate = 57600
     try:
         ser = serial.Serial(port, baud_rate, timeout=1)
