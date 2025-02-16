@@ -216,6 +216,7 @@ def Handshake():
         time.sleep(0.1)
 
 def Initialize_apps():
+
     sessions = AudioUtilities.GetAllSessions()
     fetch_app_icons()
     ser.write(b"Initialising apps\n")
@@ -234,7 +235,7 @@ def Initialize_apps():
         index += 1
 
         # If at the end of the sessions list, stop
-        if total_processes == index:
+        if total_processes == index+1:
             break
 
         if app is None:
@@ -250,7 +251,7 @@ def Initialize_apps():
         app_name = app.name().removesuffix(".exe")
         ser.write((app_name + "\n").encode())
 
-        volume_str = str(get_app_volume(session)) + "\n"
+        volume_str = str(int(get_app_volume(session)*100)) + "\n"
         ser.write(volume_str.encode())
 
         sprite_data = open_app_icon(app_name)
@@ -260,6 +261,11 @@ def Initialize_apps():
 
     print("Done sending apps")
     ser.write(b"Done\n")
+
+# def parse_line():
+#     if (ser.read()==""):
+#         #do this
+        
 
 if __name__ == "__main__":
     ser = init()
