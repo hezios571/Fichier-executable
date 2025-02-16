@@ -239,7 +239,7 @@ def wait_for_ready_signal(ser):
     while True:
         if ser.in_waiting > 0:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
-            if line == "READY_TO_RECEIVE_SPRITE":
+            if line == "READY":
                 print("[PC] ESP32 is ready to receive sprite data.")
                 return
         time.sleep(0.1)
@@ -266,26 +266,31 @@ def Initialize_apps():
     sessions = AudioUtilities.GetAllSessions()
     fetch_app_icons()
     wait_for_ready_signal(ser)
-    ser.write("Initialising apps")
+    ser.write(b"Initialising apps")
     first_iteration = True
+    total_processes=len(sessions)
+    index=0
     for session in sessions:
         app = session.Process
-        if app==None: #une fois que la liste est terminée il y a des "None" so il faut cette boucle if
+        index+=1
+        if total_processes==index:
             break
-        else:
-            if first_iteration:
-                first_iteration = False  
-            elif app.name() == app_name + ".exe":
+            if app==None: #une fois que la liste est terminée il y a des "None" so il faut cette boucle if
                 continue
-            ser.write("Start_app\n")
-            app_name=app.name().removesuffix(".exe")
-            ser.write(app_name+"\n")                         #Envoi du nom pour le struct côté ESP32
-            sprite_data = open_app_icon(app_name)
-            ser.write(get_app_volume(session)+"\n")          #Envoi du volume pour le struct
-            Chunk_send(sprite_data)                          #Envoi de l'icône
-            ser.write("End_app\n")                          #Marqueur de fin d'envoi d'app
+            else:
+                if first_iteration:
+                    first_iteration = False  
+                elif app.name() == app_name + ".exe":
+                    continue
+                ser.write(b"Start_app\n")
+                app_name=app.name().removesuffix(".exe")
+                ser.write(app_name+"\n")                         #Envoi du nom pour le struct côté ESP32
+                sprite_data = open_app_icon(app_name)
+                ser.write(get_app_volume(session)+"\n")          #Envoi du volume pour le struct
+                Chunk_send(sprite_data)                          #Envoi de l'icône
+                ser.write(b"End_app\n")                          #Marqueur de fin d'envoi d'app
     print("Done sending apps")
-    ser.write("Done")
+    ser.write(b"Done")
 
 
 
