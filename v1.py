@@ -275,5 +275,6 @@ if __name__ == "__main__":
 
     # Step 3: Print everything from ESP32
     read_serial()
+    #while (True): parse line pour les changement de volume
 
     ser.close()
