@@ -43,6 +43,10 @@ def set_app_volume(app_name: str, volume: float):
 
     print(f"Application '{app_name}' not found or not playing audio.")
 
+def get_app_volume(session):
+    volume = session.SimpleAudioVolume.GetMasterVolume()
+    return volume
+
 def icon_to_image_with_mask(hicon):
     """
     Convertit un handle d'icône Windows (hicon) en objet PIL.Image,
@@ -258,25 +262,30 @@ def Handshake():
                 break
         time.sleep(0.1)
 
-def send_app_icons():
+def Initialize_apps():
     sessions = AudioUtilities.GetAllSessions()
     fetch_app_icons()
     wait_for_ready_signal(ser)
-    print("Sending app icons...")
+    ser.write("Initialising apps")
     first_iteration = True
     for session in sessions:
         app = session.Process
-        if app==None:
+        if app==None: #une fois que la liste est terminée il y a des "None" so il faut cette boucle if
             break
         else:
             if first_iteration:
                 first_iteration = False  
             elif app.name() == app_name + ".exe":
                 continue
+            ser.write("Start_app\n")
             app_name=app.name().removesuffix(".exe")
+            ser.write(app_name+"\n")                         #Envoi du nom pour le struct côté ESP32
             sprite_data = open_app_icon(app_name)
-            Chunk_send(sprite_data)
-    print("Done sending icons")
+            ser.write(get_app_volume(session)+"\n")          #Envoi du volume pour le struct
+            Chunk_send(sprite_data)                          #Envoi de l'icône
+            ser.write("End_app\n")                          #Marqueur de fin d'envoi d'app
+    print("Done sending apps")
+    ser.write("Done")
 
 
 
@@ -284,5 +293,5 @@ def send_app_icons():
 if __name__ == "__main__":
     ser = init()
     Handshake()
-    send_app_icons()
+    Initialize_apps()
     ser.close()
