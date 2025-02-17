@@ -37,9 +37,61 @@ def set_app_volume(app_name: str, volume: float):
                process_name.lower().removesuffix(".exe") == app_name.lower()):
                 volume_control = session.SimpleAudioVolume
                 volume_control.SetMasterVolume(volume, None)
-                print(f"Volume de {process_name} défini à {volume * 100:.0f}%")
                 return
     print(f"Application '{app_name}' not found or not playing audio.")
+
+def Receive_app_volume():
+    try:
+        while True:
+            if ser.in_waiting:
+                try:
+                    line = ser.readline().decode('utf-8').strip()
+                    print(f"Received: {line}")
+                except Exception as e:
+                    print(f"Error decoding serial data: {e}")
+                    continue
+
+                # Expect command in "app_name,volume" format
+                if ',' in line:
+                    parts = line.split(',')
+                    if len(parts) == 2:
+                        app_name = parts[0].strip()
+                        try:
+                            # Assume incoming volume is given as integer percentage (0-100)
+                            vol_percent = int(parts[1].strip())
+                            volume = vol_percent / 100.0
+                            if 0.0 <= volume <= 1.0:
+                                set_app_volume(app_name, volume)
+                                # Now find the session and get the actual volume
+                                sessions = AudioUtilities.GetAllSessions()
+                                for session in sessions:
+                                    process = session.Process
+                                    if process:
+                                        process_name = process.name()
+                                        if (process_name.lower() == app_name.lower() or
+                                            process_name.lower().removesuffix(".exe") == app_name.lower()):
+                                            current_vol = session.SimpleAudioVolume.GetMasterVolume()
+                                            # Convert back to percentage (integer)
+                                            confirmed_volume = int(current_vol * 100)
+                                            # Send back the updated volume in the same format: "app_name,volume"
+                                            message = f"{app_name},{confirmed_volume}\n"
+                                            ser.write(message.encode())
+                                            ser.flush()
+                                            print(f"Sent sync: {message.strip()}")
+                                            break
+                            else:
+                                print("Volume value out of range (0.0 to 1.0).")
+                        except ValueError:
+                            print(f"Invalid volume value: {parts[1]}")
+                    else:
+                        print("Invalid command format. Expected 'app_name,volume'.")
+                else:
+                    print("Received data does not match the expected command format.")
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("Program terminated by user.")
+    finally:
+        ser.close()
 
 def get_app_volume(session):
     return session.SimpleAudioVolume.GetMasterVolume()
@@ -143,39 +195,6 @@ def open_app_icon(sprite):
             pixel565 = rgb_to_rgb565(r, g, b)
             sprite_data.extend(pixel565.to_bytes(2, byteorder="little"))
     return sprite_data
-
-def Receive_app_volume():
-    try:
-        while True:
-            if ser.in_waiting:
-                try:
-                    line = ser.readline().decode('utf-8').strip()
-                    print(f"Received: {line}")
-                except Exception as e:
-                    print(f"Error decoding serial data: {e}")
-                    continue
-
-                if ',' in line:  # "app_name,volume"
-                    parts = line.split(',')
-                    if len(parts) == 2:
-                        app_name = parts[0].strip()
-                        try:
-                            volume = float(parts[1].strip())
-                            if 0.0 <= volume <= 1.0:
-                                set_app_volume(app_name, volume)
-                            else:
-                                print("Volume value out of range (0.0 to 1.0).")
-                        except ValueError:
-                            print(f"Invalid volume value: {parts[1]}")
-                    else:
-                        print("Invalid command format. Expected 'app_name,volume'.")
-                else:
-                    print("Received data does not match the expected command format.")
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        print("Program terminated by user.")
-    finally:
-        ser.close()
 
 def Chunk_send(data):
     chunk_size = 240
