@@ -11,6 +11,8 @@ import ctypes
 import ctypes.wintypes
 import numpy as np
 
+last_known_apps = set()
+
 def init():
     """
     Initialize the serial connection to the ESP32.
@@ -82,12 +84,8 @@ def parse_line(ser):
                                     ser.flush()
                                     #print(f"[PC -> ESP32] Synced volume: {message.strip()}")
                                     break
-                    else:
-                        print(f"Volume out of range: {vol_percent}")
                 except ValueError:
                     print(f"Invalid volume value: {parts[1]}")
-            else:
-                print(f"Invalid format. Expected 'app_name,volume'. Got: {line}")
         else:
             print(f"ESP32: {line}")
 
@@ -287,6 +285,54 @@ def Initialize_apps(ser):
     print("[PC] Done sending apps.")
     ser.write(b"Done\n")
 
+def check_for_added_removed_apps(ser):
+    """
+    Detects new and removed apps, notifying the ESP32.
+    """
+    global last_known_apps
+
+    # Get the latest set of active audio apps
+    sessions = AudioUtilities.GetAllSessions()
+    current_apps = set()
+    app_data = {}  # Store volume and icon data
+
+    for session in sessions:
+        process = session.Process
+        if process:
+            app_name = process.name().removesuffix(".exe")
+            current_apps.add(app_name)
+
+            # Store volume level
+            volume_level = int(get_app_volume(session) * 100)
+            app_data[app_name] = volume_level
+
+    # Detect removed apps (previously known, but now missing)
+    removed_apps = last_known_apps - current_apps
+    for app in removed_apps:
+        print(f"[PC] App closed: {app}. Notifying ESP32...")
+        ser.write(b"Remove_app\n")
+        ser.write((app + "\n").encode())
+        ser.flush()
+
+    # Detect new apps (not in last_known_apps but now in current_apps)
+    new_apps = current_apps - last_known_apps
+    for app in new_apps:
+        print(f"[PC] New app detected: {app}. Sending to ESP32...")
+
+        ser.write(b"New_app\n")
+        ser.write((app + "\n").encode())  # Send app name
+        ser.write((str(app_data[app]) + "\n").encode())  # Send volume
+
+        # Send app icon data
+        sprite_data = open_app_icon(app)
+        Chunk_send(ser, sprite_data)
+
+        ser.write(b"End_app\n")  # Indicate end of app transmission
+
+    # Update known apps list
+    last_known_apps = current_apps
+
+
 if __name__ == "__main__":
     ser = init()
     if not ser:
@@ -300,14 +346,31 @@ if __name__ == "__main__":
         # Step 2: Send apps & icons
         Initialize_apps(ser)
 
-        # Step 3: Continuously parse lines from ESP32
-        print("[PC] Listening for volume-change commands from ESP32...")
+        # Initialize known apps list
+        initial_sessions = AudioUtilities.GetAllSessions()
+        for session in initial_sessions:
+            p = session.Process
+            if p:
+                last_known_apps.add(p.name().removesuffix(".exe"))
+
+        # Time tracking for periodic checks
+        last_check_time = time.time()
+        check_interval = 2.0  # Run every 2 seconds
+
+        # Step 3: Continuously parse lines and check for app changes
         while True:
-            parse_line(ser)
-            # lower the sleep for better responsiveness
-            time.sleep(0.00005)
+            parse_line(ser)  # Handle incoming serial data
+
+            # Run every 2 seconds
+            current_time = time.time()
+            if current_time - last_check_time >= check_interval:
+                check_for_added_removed_apps(ser)  # Check for changes
+                last_check_time = current_time  # Reset timer
+
+            time.sleep(0.00005)  # Maintain responsiveness
 
     except KeyboardInterrupt:
         print("Program terminated by user.")
     finally:
         ser.close()
+
