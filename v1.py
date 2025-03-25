@@ -1,31 +1,49 @@
-from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 import os
+import time
+import serial
+import serial.tools.list_ports
+from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 from PIL import Image
 import win32gui
 import win32api
 import win32ui
 import win32con
-import serial
-import time
 import ctypes
 import ctypes.wintypes
 import numpy as np
 
 last_known_apps = set()
 
-def init():
+def find_esp32_port(baud_rate=460800, retry_delay=2.0):
     """
-    Initialize the serial connection to the ESP32.
-    Increase baud rate to 115200 for better throughput.
+    Continuously search for an available port that can be opened at 'baud_rate'.
+    If no port is found or open fails, sleep 'retry_delay' seconds and retry.
+    Returns a valid serial.Serial object once successful.
     """
-    port = 'COM4'
-    baud_rate = 460800  # Increase from 57600
-    try:
-        ser = serial.Serial(port, baud_rate, timeout=0.1)  # shorter timeout
-        return ser
-    except Exception as e:
-        print(f"Error opening serial port: {e}")
-        return None
+    while True:
+        ports = list(serial.tools.list_ports.comports())
+        if not ports:
+            print("No COM ports found. Retrying in", retry_delay, "seconds...")
+            time.sleep(retry_delay)
+            continue
+
+        for port_info in ports:
+            device = port_info.device  # e.g. 'COM3', 'COM4', etc.
+            description = port_info.description  # e.g. 'USB-SERIAL CH340'
+            # Optionally, inspect 'port_info.vid'/'port_info.pid' if you need specific hardware matching.
+            try:
+                # Try to open the port
+                print(f"Attempting to open {device} ({description}) at {baud_rate} baud...")
+                ser = serial.Serial(device, baud_rate, timeout=0.1)
+                # If we make it this far without exception, we have a port open.
+                print(f"Connected to {device} successfully.")
+                return ser
+            except Exception as e:
+                # Could not open this port; move on to the next.
+                print(f"Failed to open {device}: {e}")
+
+        print(f"Could not find a valid port. Retrying in {retry_delay} seconds...")
+        time.sleep(retry_delay)
 
 def set_app_volume(app_name: str, volume: float):
     """
@@ -82,7 +100,6 @@ def parse_line(ser):
                                     message = f"{app_name},{confirmed_volume}\n"
                                     ser.write(message.encode())
                                     ser.flush()
-                                    #print(f"[PC -> ESP32] Synced volume: {message.strip()}")
                                     break
                 except ValueError:
                     print(f"Invalid volume value: {parts[1]}")
@@ -332,45 +349,58 @@ def check_for_added_removed_apps(ser):
     # Update known apps list
     last_known_apps = current_apps
 
+def main_loop():
+    """
+    One cycle of the main routine: handshake, initialize apps, parse lines, watch for added/removed apps.
+    If the port is disconnected, let the caller handle it (raising an exception).
+    """
+    # 1) Find and open the port
+    ser = find_esp32_port()  # Returns a serial.Serial object
+
+    # 2) Perform handshake
+    Handshake(ser)
+
+    # 3) Initialize apps
+    Initialize_apps(ser)
+
+    # 4) Populate last_known_apps
+    global last_known_apps
+    last_known_apps.clear()
+    sessions = AudioUtilities.GetAllSessions()
+    for session in sessions:
+        p = session.Process
+        if p:
+            last_known_apps.add(p.name().removesuffix(".exe"))
+
+    # 5) Main loop
+    last_check_time = time.time()
+    check_interval = 2.0  # seconds
+
+    while True:
+        parse_line(ser)  # Handle incoming serial data
+
+        current_time = time.time()
+        if current_time - last_check_time >= check_interval:
+            check_for_added_removed_apps(ser)
+            last_check_time = current_time
+
+        time.sleep(0.00005)
+
+def run_forever():
+    """
+    Runs the main_loop forever, automatically restarting if the port is disconnected.
+    """
+    while True:
+        try:
+            main_loop()
+        except (serial.SerialException, OSError) as ex:
+            # Port disconnected or other I/O error.
+            print(f"Serial error: {ex}. Restarting...")
+            time.sleep(2.0)
+            continue  # back to find_esp32_port()
+        except KeyboardInterrupt:
+            print("Program terminated by user.")
+            break  # exit altogether
 
 if __name__ == "__main__":
-    ser = init()
-    if not ser:
-        print("Failed to open serial port. Exiting.")
-        exit(1)
-
-    try:
-        # Step 1: Handshake
-        Handshake(ser)
-
-        # Step 2: Send apps & icons
-        Initialize_apps(ser)
-
-        # Initialize known apps list
-        initial_sessions = AudioUtilities.GetAllSessions()
-        for session in initial_sessions:
-            p = session.Process
-            if p:
-                last_known_apps.add(p.name().removesuffix(".exe"))
-
-        # Time tracking for periodic checks
-        last_check_time = time.time()
-        check_interval = 2.0  # Run every 2 seconds
-
-        # Step 3: Continuously parse lines and check for app changes
-        while True:
-            parse_line(ser)  # Handle incoming serial data
-
-            # Run every 2 seconds
-            current_time = time.time()
-            if current_time - last_check_time >= check_interval:
-                check_for_added_removed_apps(ser)  # Check for changes
-                last_check_time = current_time  # Reset timer
-
-            time.sleep(0.00005)  # Maintain responsiveness
-
-    except KeyboardInterrupt:
-        print("Program terminated by user.")
-    finally:
-        ser.close()
-
+    run_forever()
